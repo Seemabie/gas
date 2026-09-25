@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>NSK Bill Drop</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700;800&family=Instrument+Sans:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#081614;
+    --bg2:#0C201C;
+    --card:#102A25;
+    --card-2:#14332C;
+    --line:rgba(233,247,242,.10);
+    --line-2:rgba(233,247,242,.18);
+    --ink:#F2EEE4;
+    --ink-2:#9FB6AF;
+    --muted:#6C8981;
+    --coral:#FF6F59;
+    --coral-lt:#FF8C79;
+    --coral-dp:#E8502F;
+    --coral-soft:rgba(255,111,89,.15);
+    --coral-line:rgba(255,111,89,.42);
+    --mint:#40D89D;
+    --mint-soft:rgba(64,216,157,.16);
+    --disp:'Bricolage Grotesque',system-ui,sans-serif;
+    --body:'Instrument Sans',system-ui,sans-serif;
+    --mono:'Space Mono',monospace;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0}
+  body{
+    font-family:var(--body);color:var(--ink);font-size:17px;line-height:1.45;-webkit-font-smoothing:antialiased;
+    background:
+      radial-gradient(120% 60% at 50% -8%, rgba(255,111,89,.10), transparent 60%),
+      radial-gradient(90% 50% at 100% 110%, rgba(64,216,157,.07), transparent 60%),
+      var(--bg);
+    min-height:100vh;min-height:100dvh;
+  }
+  h1,h2,h3{font-family:var(--disp);margin:0}
+  .mono{font-family:var(--mono)}
+  button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+  :focus-visible{outline:2.5px solid var(--coral);outline-offset:3px;border-radius:8px}
+
+  .app{
+    max-width:500px;margin:0 auto;min-height:100vh;min-height:100dvh;
+    display:flex;flex-direction:column;position:relative;
+  }
+  @media(min-width:540px){
+    .app{border-inline:1px solid var(--line);box-shadow:0 40px 120px rgba(0,0,0,.5)}
+  }
+
+  /* appbar */
+  .appbar{
+    position:sticky;top:0;z-index:30;
+    padding:16px 20px 14px;padding-top:max(16px,env(safe-area-inset-top));
+    background:linear-gradient(180deg, rgba(8,22,20,.92), rgba(8,22,20,.6) 70%, transparent);
+    backdrop-filter:blur(8px);
+  }
+  .appbar .row{display:flex;align-items:center;justify-content:space-between;gap:14px}
+  .brand{font-family:var(--disp);font-weight:800;font-size:18px;letter-spacing:-.01em;display:flex;align-items:center;gap:9px}
+  .brand .spark{width:12px;height:12px;border-radius:3px;background:var(--coral);box-shadow:0 0 14px rgba(255,111,89,.7);transform:rotate(45deg)}
+  .brand small{font-family:var(--mono);font-weight:400;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-2);margin-left:2px}
+  .dots{display:flex;gap:6px}
+  .dot{width:26px;height:5px;border-radius:3px;background:rgba(233,247,242,.14);transition:background .3s,box-shadow .3s}
+  .dot.on{background:var(--coral);box-shadow:0 0 10px rgba(255,111,89,.5)}
+  .dot.done.on{background:var(--mint);box-shadow:0 0 10px rgba(64,216,157,.5)}
+
+  /* screens */
+  .screen{flex:1;display:none;flex-direction:column;padding:14px 20px 28px;animation:slide .32s cubic-bezier(.2,.8,.2,1)}
+  .screen.active{display:flex}
+  @keyframes slide{from{opacity:0;transform:translateX(14px)}to{opacity:1;transform:none}}
+
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--coral-lt);margin-bottom:10px}
+  .title{font-weight:800;font-size:34px;line-height:1.02;letter-spacing:-.02em;margin-bottom:6px}
+  .sub{color:var(--ink-2);font-size:15.5px;margin-bottom:22px}
+
+  .backline{display:inline-flex;align-items:center;gap:7px;color:var(--ink-2);font-weight:500;font-size:14px;padding:8px 12px;border-radius:10px;margin:0 -12px 6px;align-self:flex-start}
+  .backline:hover{background:var(--card);color:var(--ink)}
+  .backline svg{width:16px;height:16px}
+
+  /* driver cards */
+  .drivers{display:flex;flex-direction:column;gap:13px;margin-top:4px}
+  .dcard{
+    display:flex;align-items:center;gap:16px;width:100%;text-align:left;
+    background:var(--card);border:1.5px solid var(--line);border-radius:20px;padding:18px 18px;
+    transition:transform .1s ease,border-color .18s ease,background .18s ease;
+  }
+  .dcard:hover{background:var(--card-2);border-color:var(--line-2)}
+  .dcard:active{transform:scale(.99)}
+  .dcard.sel{border-color:var(--coral);background:var(--coral-soft)}
+  .avatar{
+    flex:none;width:56px;height:56px;border-radius:16px;display:grid;place-items:center;
+    font-family:var(--disp);font-weight:700;font-size:20px;color:var(--coral-lt);
+    background:linear-gradient(150deg, rgba(255,111,89,.22), rgba(255,111,89,.08));border:1px solid var(--coral-line);
+  }
+  .dcard .who{flex:1;min-width:0}
+  .dcard .who .nm{font-family:var(--disp);font-weight:700;font-size:20px;letter-spacing:-.01em}
+  .dcard .who .rl{font-size:13px;color:var(--muted);font-family:var(--mono);letter-spacing:.05em;margin-top:2px}
+  .dcard .go{flex:none;color:var(--muted)}
+  .dcard:hover .go{color:var(--coral)}
+  .dcard .go svg{width:22px;height:22px}
+
+  /* station search + list */
+  .search{position:relative;margin-bottom:14px}
+  .search svg{position:absolute;left:16px;top:50%;transform:translateY(-50%);width:20px;height:20px;color:var(--muted)}
+  .search input{
+    width:100%;font-family:var(--body);font-size:17px;font-weight:500;color:var(--ink);
+    background:var(--card);border:1.5px solid var(--line);border-radius:15px;padding:15px 16px 15px 46px;
+  }
+  .search input::placeholder{color:var(--muted)}
+  .search input:focus{outline:none;border-color:var(--coral-line);box-shadow:0 0 0 4px var(--coral-soft)}
+  .stationlist{display:flex;flex-direction:column;gap:8px;overflow-y:auto;flex:1;padding-bottom:8px;-webkit-overflow-scrolling:touch}
+  .srow{
+    display:flex;align-items:center;gap:13px;width:100%;text-align:left;
+    background:var(--card);border:1px solid var(--line);border-radius:14px;padding:15px 15px;
+    transition:background .14s ease,border-color .14s ease;
+  }
+  .srow:hover{background:var(--card-2);border-color:var(--line-2)}
+  .srow:active{background:var(--coral-soft)}
+  .srow .pin{flex:none;color:var(--coral);opacity:.85}
+  .srow .pin svg{width:19px;height:19px;display:block}
+  .srow .sname{flex:1;font-weight:600;font-size:16px}
+  .srow .chev{flex:none;color:var(--muted)}
+  .srow .chev svg{width:20px;height:20px;display:block}
+  .empty{text-align:center;color:var(--muted);padding:34px 10px;font-size:15px}
+
+  /* capture */
+  .ctx{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px}
+  .chip{display:inline-flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:999px;padding:9px 14px;font-size:14px;font-weight:500}
+  .chip .ch-ic{width:22px;height:22px;border-radius:7px;display:grid;place-items:center;background:var(--coral-soft);color:var(--coral-lt)}
+  .chip .ch-ic svg{width:13px;height:13px}
+  .chip b{font-family:var(--disp);font-weight:700}
+
+  .drop{
+    width:100%;border:2px dashed var(--coral-line);background:var(--coral-soft);border-radius:20px;
+    padding:34px 20px;display:flex;flex-direction:column;align-items:center;gap:12px;color:var(--coral-lt);
+    transition:background .15s ease,border-color .15s ease;
+  }
+  .drop:hover{background:rgba(255,111,89,.2);border-color:var(--coral)}
+  .drop .cam{width:56px;height:56px;border-radius:16px;background:rgba(255,111,89,.2);display:grid;place-items:center;color:var(--coral-lt)}
+  .drop .cam svg{width:28px;height:28px}
+  .drop .lg{font-family:var(--disp);font-weight:700;font-size:19px;color:var(--ink)}
+  .drop .sm{font-size:13.5px;color:var(--ink-2);font-family:var(--mono);letter-spacing:.03em}
+
+  .shots{display:flex;flex-wrap:wrap;gap:11px}
+  .shot{position:relative;width:104px;height:132px;border-radius:14px;overflow:hidden;border:1px solid var(--line-2);background:var(--card)}
+  .shot img{width:100%;height:100%;object-fit:cover;display:block}
+  .shot .x{position:absolute;top:6px;right:6px;width:26px;height:26px;border-radius:50%;background:rgba(8,22,20,.85);color:#fff;display:grid;place-items:center;font-size:16px;line-height:1;border:1px solid var(--line-2)}
+  .addmore{width:104px;height:132px;border-radius:14px;border:1.5px dashed var(--coral-line);background:var(--coral-soft);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;color:var(--coral-lt);font-family:var(--mono);font-size:12px;letter-spacing:.04em}
+  .addmore:hover{background:rgba(255,111,89,.2)}
+  .addmore svg{width:24px;height:24px}
+
+  /* dock */
+  .dock{position:fixed;left:0;right:0;bottom:0;z-index:40;display:none;padding:14px 20px;padding-bottom:max(16px,env(safe-area-inset-bottom));background:linear-gradient(0deg, var(--bg) 62%, transparent)}
+  .dock.show{display:block}
+  .dock-in{max-width:500px;margin:0 auto}
+  .err{color:var(--coral-lt);font-size:13.5px;text-align:center;margin-bottom:10px;font-weight:500}
+
+  .btn{
+    width:100%;display:inline-flex;align-items:center;justify-content:center;gap:10px;
+    font-family:var(--disp);font-weight:700;font-size:18px;letter-spacing:.01em;
+    padding:18px 20px;border-radius:16px;min-height:60px;transition:transform .07s ease,filter .15s ease,opacity .15s ease;
+  }
+  .btn:active{transform:scale(.985)}
+  .btn svg{width:20px;height:20px}
+  .btn-primary{background:linear-gradient(180deg,var(--coral-lt),var(--coral));color:#2A0E08;box-shadow:0 10px 26px rgba(255,111,89,.28)}
+  .btn-primary:hover{filter:brightness(1.04)}
+  .btn-primary:disabled{opacity:.45;box-shadow:none;cursor:default;filter:grayscale(.3)}
+  .btn-ghost{background:var(--card);color:var(--ink);border:1.5px solid var(--line-2)}
+  .btn-ghost:hover{background:var(--card-2)}
+
+  /* success */
+  .success{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px 22px 40px}
+  .seal{width:104px;height:104px;border-radius:50%;background:var(--mint-soft);border:2px solid rgba(64,216,157,.4);display:grid;place-items:center;color:var(--mint);margin-bottom:22px;box-shadow:0 0 0 10px rgba(64,216,157,.06),0 16px 40px rgba(64,216,157,.2);animation:pop .5s cubic-bezier(.2,.9,.3,1.25) both}
+  .seal svg{width:52px;height:52px}
+  @keyframes pop{0%{opacity:0;transform:scale(.6)}100%{opacity:1;transform:scale(1)}}
+  .success h2{font-weight:800;font-size:30px;letter-spacing:-.02em;margin-bottom:8px}
+  .success .note{color:var(--ink-2);font-size:15.5px;margin-bottom:24px}
+
+  .receipt{width:100%;max-width:340px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px 18px;margin-bottom:26px;text-align:left;position:relative}
+  .receipt::before{content:'';position:absolute;top:0;left:14px;right:14px;height:3px;background:repeating-linear-gradient(90deg,var(--coral) 0 8px,transparent 8px 15px);border-radius:3px}
+  .rline{display:flex;align-items:baseline;gap:10px;padding:8px 0;font-family:var(--mono);font-size:13.5px}
+  .rline + .rline{border-top:1px dashed var(--line)}
+  .rline .k{color:var(--muted);letter-spacing:.05em;text-transform:uppercase;font-size:11px;width:74px;flex:none}
+  .rline .v{color:var(--ink);font-weight:700;flex:1;word-break:break-word}
+  .rline .v.big{color:var(--mint)}
+  .success .actions{width:100%;max-width:340px;display:flex;flex-direction:column;gap:11px}
+
+  @media(max-width:360px){.title{font-size:29px}}
+  @media(prefers-reduced-motion:reduce){*{animation:none !important;transition:none !important}}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header class="appbar">
+    <div class="row">
+      <div class="brand"><span class="spark"></span>NSK <small>Bill Drop</small></div>
+      <div class="dots"><span class="dot on" id="d1"></span><span class="dot" id="d2"></span><span class="dot" id="d3"></span></div>
+    </div>
+  </header>
+
+  <!-- STEP 1 : DRIVER -->
+  <section class="screen active" id="s1">
+    <div class="kicker">Step 1 of 3 · Driver</div>
+    <h1 class="title">Who's driving?</h1>
+    <p class="sub">Tap your name to start a bill drop.</p>
+    <div class="drivers" id="driverList"></div>
+  </section>
+
+  <!-- STEP 2 : STATION -->
+  <section class="screen" id="s2">
+    <button class="backline" data-back="1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg> Driver</button>
+    <div class="kicker">Step 2 of 3 · Station</div>
+    <h1 class="title">Which station?</h1>
+    <p class="sub">Search or scroll, then tap the station you delivered to.</p>
+    <div class="search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.7" y2="16.7"/></svg>
+      <input id="stationSearch" type="text" placeholder="Search stations" autocomplete="off">
+    </div>
+    <div class="stationlist" id="stationList"></div>
+  </section>
+
+  <!-- STEP 3 : BILL -->
+  <section class="screen" id="s3">
+    <button class="backline" data-back="2"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg> Station</button>
+    <div class="kicker">Step 3 of 3 · Gas bill</div>
+    <h1 class="title">Upload the bill</h1>
+    <div class="ctx">
+      <span class="chip"><span class="ch-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21a8 8 0 1 0-16 0"/><circle cx="12" cy="7" r="4"/></svg></span><b id="ctxDriver">—</b></span>
+      <span class="chip"><span class="ch-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s7-6.4 7-12a7 7 0 1 0-14 0c0 5.6 7 12 7 12Z"/><circle cx="12" cy="9" r="2.4"/></svg></span><b id="ctxStation">—</b></span>
+    </div>
+    <div id="shotArea"></div>
+  </section>
+
+  <!-- STEP 4 : DONE -->
+  <section class="screen" id="s4">
+    <div class="success">
+      <div class="seal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div>
+      <h2>Bill saved</h2>
+      <p class="note">Filed in Drive under the station folder.</p>
+      <div class="receipt" id="receipt"></div>
+      <div class="actions">
+        <a class="btn btn-ghost" id="driveBtn" target="_blank" rel="noopener" style="display:none">Open station folder</a>
+        <button class="btn btn-primary" id="againBtn">Upload another for this station</button>
+        <button class="btn btn-ghost" id="newBtn">New bill drop</button>
+      </div>
+    </div>
+  </section>
+
+  <div class="dock" id="dock">
+    <div class="dock-in">
+      <div class="err" id="errLine" style="display:none"></div>
+      <button class="btn btn-primary" id="submitBtn" disabled>Submit bill</button>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="fileInput" accept="image/*" multiple style="display:none">
+
+<script>
+// ============================================================
+// CONFIG  ▸  paste your Google Apps Script Web App URL below.
+// Leave it as "" to run in demo mode (nothing gets uploaded).
+const ENDPOINT = "";
+// ============================================================
+
+const DRIVERS = ['Travis D Williams','Jahmarie Brown','John Christian Hevarria'];
+const STATIONS = [
+  'Cold Spring Svc Center','688 Freedom Plains Inc.','100 Route 17K',
+  '501 Nyack Inc.','One Stop Auto Center Shell76','Norwich Fresh Mkt Inc.',"Kirmani's Fresh Mkt Inc.",
+  'Dover Plains','Rockaway Petru Inc.','Sunrise V.S. Inc.','28 Main St Ct Inc.',
+  '189 Kings Park Inc.','Route 82 Verbank','600 Tulip Ave Inc.','200 23rd Street Enterprice Inc',
+  '135 Montauk Hwy LLC','32 GermanTown Inc.','1429 Upper Front St','435 MPA Inc.',
+  'Baba Jee Inc.','100 North 9th Street LLC','4184 Post Road'
+];
+
+const ICON = {
+  chev:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>',
+  pin:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s7-6.4 7-12a7 7 0 1 0-14 0c0 5.6 7 12 7 12Z"/><circle cx="12" cy="9" r="2.2"/></svg>',
+  cam:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8a2 2 0 0 1 2-2h1.6l1-1.6a1 1 0 0 1 .85-.4h5.1a1 1 0 0 1 .85.4L17.4 6H19a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"/><circle cx="12" cy="12.5" r="3.3"/></svg>',
+  plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>'
+};
+
+let state = { step:1, driver:'', station:'', photos:[] };
+const el = id => document.getElementById(id);
+const fileInput = el('fileInput');
+
+function initials(name){ const p = name.trim().split(/\s+/); return (((p[0]||'')[0]||'') + ((p[p.length-1]||'')[0]||'')).toUpperCase(); }
+
+/* ---- step 1 : drivers ---- */
+function renderDrivers(){
+  const box = el('driverList');
+  DRIVERS.forEach(name => {
+    const b = document.createElement('button'); b.className = 'dcard';
+    b.innerHTML = `<span class="avatar">${initials(name)}</span>
+      <span class="who"><span class="nm"></span><span class="rl">Fuel delivery</span></span>
+      <span class="go">${ICON.chev}</span>`;
+    b.querySelector('.nm').textContent = name;
+    b.onclick = () => { state.driver = name; el('stationSearch').value=''; renderStations(''); showStep(2); };
+    box.appendChild(b);
+  });
+}
+
+/* ---- step 2 : stations ---- */
+function renderStations(q){
+  const list = el('stationList'); list.innerHTML = '';
+  const term = (q||'').toLowerCase().trim();
+  const matches = STATIONS.filter(s => s.toLowerCase().includes(term));
+  if(!matches.length){ const d=document.createElement('div'); d.className='empty'; d.textContent = 'No station matches that search.'; list.appendChild(d); return; }
+  matches.forEach(s => {
+    const b = document.createElement('button'); b.className='srow';
+    b.innerHTML = `<span class="pin">${ICON.pin}</span><span class="sname"></span><span class="chev">${ICON.chev}</span>`;
+    b.querySelector('.sname').textContent = s;
+    b.onclick = () => { state.station = s; showStep(3); };
+    list.appendChild(b);
+  });
+}
+el('stationSearch').addEventListener('input', e => renderStations(e.target.value));
+
+/* ---- step 3 : photos ---- */
+function renderShots(){
+  const area = el('shotArea');
+  if(state.photos.length === 0){
+    area.innerHTML = `<button class="drop" id="dropBtn">
+      <span class="cam">${ICON.cam}</span>
+      <span class="lg">Take a photo of the bill</span>
+      <span class="sm">or choose one from your phone</span>
+    </button>`;
+    el('dropBtn').onclick = pickPhoto;
+  } else {
+    const wrap = document.createElement('div'); wrap.className='shots';
+    state.photos.forEach((p,i) => {
+      const s = document.createElement('div'); s.className='shot';
+      s.innerHTML = `<img src="${p.url}" alt=""><button class="x" aria-label="Remove">&times;</button>`;
+      s.querySelector('.x').onclick = () => { URL.revokeObjectURL(p.url); state.photos.splice(i,1); renderShots(); updateSubmit(); };
+      wrap.appendChild(s);
+    });
+    const add = document.createElement('button'); add.className='addmore';
+    add.innerHTML = `${ICON.plus}<span>Add</span>`;
+    add.onclick = pickPhoto;
+    wrap.appendChild(add);
+    area.innerHTML = ''; area.appendChild(wrap);
+  }
+}
+function pickPhoto(){ fileInput.value=''; fileInput.click(); }
+fileInput.addEventListener('change', () => {
+  Array.from(fileInput.files || []).forEach(f => { if(f.type.startsWith('image/')) state.photos.push({file:f, url:URL.createObjectURL(f)}); });
+  renderShots(); updateSubmit();
+});
+function updateSubmit(){ el('submitBtn').disabled = state.photos.length === 0; }
+
+/* ---- navigation ---- */
+function showStep(n){
+  state.step = n;
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  el('s'+n).classList.add('active');
+  [1,2,3].forEach(i => { const d=el('d'+i); d.classList.toggle('on', i <= Math.min(n,3)); d.classList.toggle('done', n===4); });
+  el('dock').classList.toggle('show', n===3);
+  if(n===3){ el('ctxDriver').textContent = state.driver; el('ctxStation').textContent = state.station; renderShots(); updateSubmit(); hideErr(); }
+  window.scrollTo({top:0, behavior:'instant'});
+}
+document.querySelectorAll('[data-back]').forEach(b => b.onclick = () => showStep(parseInt(b.dataset.back,10)));
+
+/* ---- upload ---- */
+function shrink(file, maxDim, q){
+  maxDim = maxDim || 1600; q = q || 0.82;
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file), img = new Image();
+    img.onload = () => {
+      let w = img.width, h = img.height;
+      if(Math.max(w,h) > maxDim){ const s = maxDim/Math.max(w,h); w = Math.round(w*s); h = Math.round(h*s); }
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      c.getContext('2d').drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      resolve(c.toDataURL('image/jpeg', q).split(',')[1]);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('image failed')); };
+    img.src = url;
+  });
+}
+async function buildPayload(onProgress){
+  const photos = []; let d = 0;
+  for(const p of state.photos){ photos.push(await shrink(p.file)); d++; if(onProgress) onProgress(d); }
+  return { driver:state.driver, station:state.station, timestamp:new Date().toISOString(), photos };
+}
+function showErr(m){ const e=el('errLine'); e.textContent=m; e.style.display='block'; }
+function hideErr(){ el('errLine').style.display='none'; }
+
+el('submitBtn').addEventListener('click', async () => {
+  if(state.photos.length === 0) return;
+  const btn = el('submitBtn'); hideErr();
+  if(!ENDPOINT){ finishDone(demoRef(), null); return; }
+  const total = state.photos.length;
+  btn.disabled = true; btn.textContent = 'Preparing…';
+  const c = new AbortController(); const t = setTimeout(() => c.abort(), 45000);
+  try{
+    const payload = await buildPayload(n => btn.textContent = `Uploading… ${n}/${total}`);
+    btn.textContent = 'Sending…';
+    const res = await fetch(ENDPOINT, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify(payload), signal: c.signal });
+    clearTimeout(t);
+    const data = await res.json();
+    if(!data || !data.ok) throw new Error((data && data.error) || 'server did not confirm');
+    finishDone(data.ref, data.folderUrl);
+  }catch(err){
+    clearTimeout(t);
+    btn.disabled = false; btn.textContent = 'Retry submit';
+    showErr((err && err.name === 'AbortError') ? 'The server took too long. Try again.' : ('Could not send: ' + (err.message || err)));
+  }
+});
+
+function demoRef(){ return 'BILL-' + new Date().toISOString().slice(2,10).replace(/-/g,'') + '-' + Math.random().toString(36).slice(2,5).toUpperCase(); }
+
+function finishDone(ref, folderUrl){
+  const now = new Date();
+  const dateStr = now.toLocaleString([], {year:'numeric', month:'short', day:'numeric', hour:'numeric', minute:'2-digit'});
+  const rows = [
+    ['Station', state.station],
+    ['Driver', state.driver],
+    ['Date', dateStr],
+    ['Ref', ref || '—']
+  ];
+  el('receipt').innerHTML = rows.map(r => `<div class="rline"><span class="k">${r[0]}</span><span class="v"></span></div>`).join('');
+  el('receipt').querySelectorAll('.v').forEach((v,i) => v.textContent = rows[i][1]);
+  const link = el('driveBtn');
+  if(folderUrl){ link.href = folderUrl; link.style.display = 'inline-flex'; } else { link.style.display = 'none'; }
+  el('dock').classList.remove('show');
+  showStep(4);
+}
+
+/* ---- success actions ---- */
+el('againBtn').addEventListener('click', () => {
+  state.photos.forEach(p => URL.revokeObjectURL(p.url));
+  state.photos = [];
+  showStep(3);
+});
+el('newBtn').addEventListener('click', () => {
+  state.photos.forEach(p => URL.revokeObjectURL(p.url));
+  state = { step:1, driver:'', station:'', photos:[] };
+  el('stationSearch').value = '';
+  showStep(1);
+});
+
+/* init */
+renderDrivers();
+renderStations('');
+</script>
+</body>
+</html>
