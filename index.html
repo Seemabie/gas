@@ -175,6 +175,11 @@
   .upbtn.file-btn{background:var(--card);color:var(--ink);border:1.5px solid var(--line-2)}
   .upbtn.file-btn:hover{background:var(--card-2)}
 
+  /* capture section labels + requirement hint */
+  .caplabel{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--coral-lt);font-weight:700;margin:2px 0 10px}
+  .caplabel-2{margin-top:22px}
+  .hint{color:var(--ink-2);font-size:13px;text-align:center;margin-bottom:10px;font-family:var(--mono);letter-spacing:.02em}
+
   /* dock */
   .dock{position:fixed;left:0;right:0;bottom:0;z-index:40;display:none;padding:14px 20px;padding-bottom:max(16px,env(safe-area-inset-bottom));background:linear-gradient(0deg, var(--bg) 62%, transparent)}
   .dock.show{display:block}
@@ -249,21 +254,24 @@
   <!-- STEP 3 : BILL -->
   <section class="screen" id="s3">
     <button class="backline" data-back="2"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg> Station</button>
-    <div class="kicker">Step 3 of 3 · Gas bill</div>
-    <h1 class="title">Upload the bill</h1>
+    <div class="kicker">Step 3 of 3 · Bill &amp; meter</div>
+    <h1 class="title">Bill &amp; meter</h1>
     <div class="ctx">
       <span class="chip"><span class="ch-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21a8 8 0 1 0-16 0"/><circle cx="12" cy="7" r="4"/></svg></span><b id="ctxDriver">—</b></span>
       <span class="chip"><span class="ch-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s7-6.4 7-12a7 7 0 1 0-14 0c0 5.6 7 12 7 12Z"/><circle cx="12" cy="9" r="2.4"/></svg></span><b id="ctxStation">—</b></span>
     </div>
+    <div class="caplabel">Gas bill</div>
     <div id="shotArea"></div>
+    <div class="caplabel caplabel-2">Meter reading</div>
+    <div id="meterArea"></div>
   </section>
 
   <!-- STEP 4 : DONE -->
   <section class="screen" id="s4">
     <div class="success">
       <div class="seal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div>
-      <h2>Bill saved</h2>
-      <p class="note">Filed in Drive under the station folder.</p>
+      <h2>Saved</h2>
+      <p class="note">Bill and meter reading filed in Drive.</p>
       <div class="receipt" id="receipt"></div>
       <div class="actions">
         <a class="btn btn-ghost" id="driveBtn" target="_blank" rel="noopener" style="display:none">Open station folder</a>
@@ -275,14 +283,17 @@
 
   <div class="dock" id="dock">
     <div class="dock-in">
+      <div class="hint" id="hintLine" style="display:none"></div>
       <div class="err" id="errLine" style="display:none"></div>
-      <button class="btn btn-primary" id="submitBtn" disabled>Submit bill</button>
+      <button class="btn btn-primary" id="submitBtn" disabled>Submit</button>
     </div>
   </div>
 </div>
 
 <input type="file" id="fileCamera" accept="image/*" capture="environment" style="display:none">
 <input type="file" id="fileFiles" accept="image/*" multiple style="display:none">
+<input type="file" id="fileMeterCamera" accept="image/*" capture="environment" style="display:none">
+<input type="file" id="fileMeterFiles" accept="image/*" multiple style="display:none">
 
 <script>
 // ============================================================
@@ -309,10 +320,12 @@ const ICON = {
   img:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="8.5" cy="9.5" r="1.8"/><path d="M4 18l5-5 4 4 3-3 4 4"/></svg>'
 };
 
-let state = { step:1, driver:'', station:'', photos:[] };
+let state = { step:1, driver:'', station:'', photos:[], meterPhotos:[] };
 const el = id => document.getElementById(id);
 const fileCamera = el('fileCamera');
 const fileFiles = el('fileFiles');
+const fileMeterCamera = el('fileMeterCamera');
+const fileMeterFiles = el('fileMeterFiles');
 
 function initials(name){ const p = name.trim().split(/\s+/); return (((p[0]||'')[0]||'') + ((p[p.length-1]||'')[0]||'')).toUpperCase(); }
 
@@ -346,49 +359,63 @@ function renderStations(q){
 }
 el('stationSearch').addEventListener('input', e => renderStations(e.target.value));
 
-/* ---- step 3 : photos ---- */
-function renderShots(){
-  const area = el('shotArea');
-  if(state.photos.length === 0){
+/* ---- step 3 : photos (gas bill + meter reading) ---- */
+function renderCapture(areaId, arr, openCam, openFiles, emptyTitle, emptySub){
+  const area = el(areaId);
+  if(arr.length === 0){
     area.innerHTML = `<div class="droparea">
       <span class="cam">${ICON.cam}</span>
-      <span class="lg">Add the gas bill</span>
-      <span class="sm">Take a photo, or pick one from your files</span>
+      <span class="lg">${emptyTitle}</span>
+      <span class="sm">${emptySub}</span>
       <div class="uprow">
-        <button class="upbtn cam-btn" id="camBtn">${ICON.cam}<span>Take a photo</span></button>
-        <button class="upbtn file-btn" id="fileBtn">${ICON.img}<span>Choose from files</span></button>
+        <button class="upbtn cam-btn" type="button">${ICON.cam}<span>Take a photo</span></button>
+        <button class="upbtn file-btn" type="button">${ICON.img}<span>Choose from files</span></button>
       </div>
     </div>`;
-    el('camBtn').onclick = openCamera;
-    el('fileBtn').onclick = openFiles;
+    area.querySelector('.cam-btn').onclick = openCam;
+    area.querySelector('.file-btn').onclick = openFiles;
   } else {
     const wrap = document.createElement('div'); wrap.className='shots';
-    state.photos.forEach((p,i) => {
+    arr.forEach((p,i) => {
       const s = document.createElement('div'); s.className='shot';
-      s.innerHTML = `<img src="${p.url}" alt=""><button class="x" aria-label="Remove">&times;</button>`;
-      s.querySelector('.x').onclick = () => { URL.revokeObjectURL(p.url); state.photos.splice(i,1); renderShots(); updateSubmit(); };
+      s.innerHTML = `<img src="${p.url}" alt=""><button class="x" type="button" aria-label="Remove">&times;</button>`;
+      s.querySelector('.x').onclick = () => { URL.revokeObjectURL(p.url); arr.splice(i,1); renderShots(); updateSubmit(); };
       wrap.appendChild(s);
     });
-    const addCam = document.createElement('button'); addCam.className='addmore';
+    const addCam = document.createElement('button'); addCam.type='button'; addCam.className='addmore';
     addCam.innerHTML = `${ICON.cam}<span>Camera</span>`;
-    addCam.onclick = openCamera;
+    addCam.onclick = openCam;
     wrap.appendChild(addCam);
-    const addFile = document.createElement('button'); addFile.className='addmore';
+    const addFile = document.createElement('button'); addFile.type='button'; addFile.className='addmore';
     addFile.innerHTML = `${ICON.img}<span>Files</span>`;
     addFile.onclick = openFiles;
     wrap.appendChild(addFile);
     area.innerHTML = ''; area.appendChild(wrap);
   }
 }
-function addFiles(list){
-  Array.from(list || []).forEach(f => { if(f.type.startsWith('image/')) state.photos.push({file:f, url:URL.createObjectURL(f)}); });
+function renderShots(){
+  renderCapture('shotArea', state.photos, openBillCamera, openBillFiles, 'Add the gas bill', 'Take a photo, or pick one from your files');
+  renderCapture('meterArea', state.meterPhotos, openMeterCamera, openMeterFiles, 'Add the meter reading', 'Photograph the meter or pump display');
+}
+function addTo(arr, list){
+  Array.from(list || []).forEach(f => { if(f.type.startsWith('image/')) arr.push({file:f, url:URL.createObjectURL(f)}); });
   renderShots(); updateSubmit();
 }
-function openCamera(){ fileCamera.value=''; fileCamera.click(); }
-function openFiles(){ fileFiles.value=''; fileFiles.click(); }
-fileCamera.addEventListener('change', () => { addFiles(fileCamera.files); fileCamera.value=''; });
-fileFiles.addEventListener('change', () => { addFiles(fileFiles.files); fileFiles.value=''; });
-function updateSubmit(){ el('submitBtn').disabled = state.photos.length === 0; }
+function openBillCamera(){ fileCamera.value=''; fileCamera.click(); }
+function openBillFiles(){ fileFiles.value=''; fileFiles.click(); }
+function openMeterCamera(){ fileMeterCamera.value=''; fileMeterCamera.click(); }
+function openMeterFiles(){ fileMeterFiles.value=''; fileMeterFiles.click(); }
+fileCamera.addEventListener('change', () => { addTo(state.photos, fileCamera.files); fileCamera.value=''; });
+fileFiles.addEventListener('change', () => { addTo(state.photos, fileFiles.files); fileFiles.value=''; });
+fileMeterCamera.addEventListener('change', () => { addTo(state.meterPhotos, fileMeterCamera.files); fileMeterCamera.value=''; });
+fileMeterFiles.addEventListener('change', () => { addTo(state.meterPhotos, fileMeterFiles.files); fileMeterFiles.value=''; });
+function updateSubmit(){
+  const okBill = state.photos.length > 0, okMeter = state.meterPhotos.length > 0;
+  el('submitBtn').disabled = !(okBill && okMeter);
+  const hint = el('hintLine');
+  if(okBill && okMeter){ hint.style.display='none'; hint.textContent=''; }
+  else { hint.textContent = (!okBill && !okMeter) ? 'Add a gas bill photo and a meter photo' : (!okBill ? 'Add a gas bill photo' : 'Add a meter reading photo'); hint.style.display='block'; }
+}
 
 /* ---- navigation ---- */
 function showStep(n){
@@ -420,19 +447,20 @@ function shrink(file, maxDim, q){
   });
 }
 async function buildPayload(ref, onProgress){
-  const photos = []; let d = 0;
-  for(const p of state.photos){ photos.push(await shrink(p.file)); d++; if(onProgress) onProgress(d); }
-  return { ref:ref, driver:state.driver, station:state.station, timestamp:new Date().toISOString(), photos };
+  const photos = [], meterPhotos = []; let d = 0;
+  const total = state.photos.length + state.meterPhotos.length;
+  for(const p of state.photos){ photos.push(await shrink(p.file)); d++; if(onProgress) onProgress(d, total); }
+  for(const p of state.meterPhotos){ meterPhotos.push(await shrink(p.file)); d++; if(onProgress) onProgress(d, total); }
+  return { ref:ref, driver:state.driver, station:state.station, timestamp:new Date().toISOString(), photos, meterPhotos };
 }
 function showErr(m){ const e=el('errLine'); e.textContent=m; e.style.display='block'; }
 function hideErr(){ el('errLine').style.display='none'; }
 
 el('submitBtn').addEventListener('click', async () => {
-  if(state.photos.length === 0) return;
+  if(state.photos.length === 0 || state.meterPhotos.length === 0) return;
   const btn = el('submitBtn'); hideErr();
   const ref = demoRef();
   if(!ENDPOINT){ finishDone(ref, null); return; }
-  const total = state.photos.length;
   btn.disabled = true; btn.textContent = 'Preparing…';
   // Fire-and-forget: Apps Script answers from a different domain, which phone
   // browsers cannot read back. We send with no-cors (the bill still saves on
@@ -440,7 +468,7 @@ el('submitBtn').addEventListener('click', async () => {
   // hangs waiting for a reply it is not allowed to read.
   const c = new AbortController(); const t = setTimeout(() => c.abort(), 45000);
   try{
-    const payload = await buildPayload(ref, n => btn.textContent = `Uploading… ${n}/${total}`);
+    const payload = await buildPayload(ref, (n,t) => btn.textContent = `Uploading… ${n}/${t}`);
     btn.textContent = 'Sending…';
     await fetch(ENDPOINT, { method:'POST', mode:'no-cors', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify(payload), signal: c.signal });
     clearTimeout(t);
@@ -474,12 +502,14 @@ function finishDone(ref, folderUrl){
 /* ---- success actions ---- */
 el('againBtn').addEventListener('click', () => {
   state.photos.forEach(p => URL.revokeObjectURL(p.url));
-  state.photos = [];
+  state.meterPhotos.forEach(p => URL.revokeObjectURL(p.url));
+  state.photos = []; state.meterPhotos = [];
   showStep(3);
 });
 el('newBtn').addEventListener('click', () => {
   state.photos.forEach(p => URL.revokeObjectURL(p.url));
-  state = { step:1, driver:'', station:'', photos:[] };
+  state.meterPhotos.forEach(p => URL.revokeObjectURL(p.url));
+  state = { step:1, driver:'', station:'', photos:[], meterPhotos:[] };
   el('stationSearch').value = '';
   showStep(1);
 });
