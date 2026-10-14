@@ -419,10 +419,10 @@ function shrink(file, maxDim, q){
     img.src = url;
   });
 }
-async function buildPayload(onProgress){
+async function buildPayload(ref, onProgress){
   const photos = []; let d = 0;
   for(const p of state.photos){ photos.push(await shrink(p.file)); d++; if(onProgress) onProgress(d); }
-  return { driver:state.driver, station:state.station, timestamp:new Date().toISOString(), photos };
+  return { ref:ref, driver:state.driver, station:state.station, timestamp:new Date().toISOString(), photos };
 }
 function showErr(m){ const e=el('errLine'); e.textContent=m; e.style.display='block'; }
 function hideErr(){ el('errLine').style.display='none'; }
@@ -430,22 +430,25 @@ function hideErr(){ el('errLine').style.display='none'; }
 el('submitBtn').addEventListener('click', async () => {
   if(state.photos.length === 0) return;
   const btn = el('submitBtn'); hideErr();
-  if(!ENDPOINT){ finishDone(demoRef(), null); return; }
+  const ref = demoRef();
+  if(!ENDPOINT){ finishDone(ref, null); return; }
   const total = state.photos.length;
   btn.disabled = true; btn.textContent = 'Preparing…';
+  // Fire-and-forget: Apps Script answers from a different domain, which phone
+  // browsers cannot read back. We send with no-cors (the bill still saves on
+  // the server) and confirm from a reference generated here, so the app never
+  // hangs waiting for a reply it is not allowed to read.
   const c = new AbortController(); const t = setTimeout(() => c.abort(), 45000);
   try{
-    const payload = await buildPayload(n => btn.textContent = `Uploading… ${n}/${total}`);
+    const payload = await buildPayload(ref, n => btn.textContent = `Uploading… ${n}/${total}`);
     btn.textContent = 'Sending…';
-    const res = await fetch(ENDPOINT, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify(payload), signal: c.signal });
+    await fetch(ENDPOINT, { method:'POST', mode:'no-cors', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify(payload), signal: c.signal });
     clearTimeout(t);
-    const data = await res.json();
-    if(!data || !data.ok) throw new Error((data && data.error) || 'server did not confirm');
-    finishDone(data.ref, data.folderUrl);
+    finishDone(ref, null);
   }catch(err){
     clearTimeout(t);
     btn.disabled = false; btn.textContent = 'Retry submit';
-    showErr((err && err.name === 'AbortError') ? 'The server took too long. Try again.' : ('Could not send: ' + (err.message || err)));
+    showErr((err && err.name === 'AbortError') ? 'The upload took too long on this connection. Please try again.' : ('Could not send: ' + (err.message || err)));
   }
 });
 
