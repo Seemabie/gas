@@ -378,7 +378,7 @@ el('stationSearch').addEventListener('input', e => renderStations(e.target.value
 const MAX_DIM = 1600, JPEG_Q = 0.82, THUMB_DIM = 260;
 const work = [];
 let working = false, sending = false, photoSeq = 0;
-const jobCanvas = document.createElement('canvas');
+const jobCanvas = document.createElement('canvas'), thumbCanvas = document.createElement('canvas');
 const listOf = kind => kind === 'meter' ? state.meterPhotos : state.photos;
 const allPhotos = () => state.photos.concat(state.meterPhotos);
 
@@ -398,20 +398,7 @@ function renderCapture(areaId, kind, openCam, openFiles, emptyTitle, emptySub){
     area.querySelector('.file-btn').onclick = openFiles;
   } else {
     const wrap = document.createElement('div'); wrap.className='shots';
-    arr.forEach(p => {
-      const s = document.createElement('div');
-      s.className = 'shot' + (p.status === 'ready' ? '' : ' processing');
-      s.innerHTML = (p.status === 'ready' ? '<img alt="">' : '<span class="spin" aria-label="Preparing photo"></span>') +
-        '<button class="x" type="button" aria-label="Remove">&times;</button>';
-      if(p.status === 'ready') s.querySelector('img').src = p.thumb;
-      s.querySelector('.x').onclick = () => {
-        if(sending) return;
-        const list = listOf(kind), i = list.indexOf(p);
-        if(i > -1) list.splice(i,1);
-        renderShots(); updateSubmit();
-      };
-      wrap.appendChild(s);
-    });
+    arr.forEach(p => wrap.appendChild(tileFor(p, kind)));
     const addCam = document.createElement('button'); addCam.type='button'; addCam.className='addmore';
     addCam.innerHTML = `${ICON.cam}<span>Camera</span>`;
     addCam.onclick = openCam;
@@ -423,6 +410,34 @@ function renderCapture(areaId, kind, openCam, openFiles, emptyTitle, emptySub){
     area.innerHTML = ''; area.appendChild(wrap);
   }
 }
+// one tile per photo, reused between redraws, so 50+ photos never means
+// rebuilding 50+ thumbnails every time one more photo finishes
+const tiles = new WeakMap();
+function tileFor(p, kind){
+  let t = tiles.get(p);
+  if(!t){
+    t = document.createElement('div'); t._st = '';
+    const x = document.createElement('button'); x.className = 'x'; x.type = 'button';
+    x.setAttribute('aria-label', 'Remove'); x.innerHTML = '&times;';
+    x.onclick = () => {
+      if(sending) return;
+      const list = listOf(kind), i = list.indexOf(p);
+      if(i > -1) list.splice(i,1);
+      renderShots(); updateSubmit();
+    };
+    t.appendChild(x); tiles.set(p, t);
+  }
+  if(t._st !== p.status){
+    t._st = p.status;
+    t.className = 'shot' + (p.status === 'ready' ? '' : ' processing');
+    const old = t.querySelector('img, .spin'); if(old) old.remove();
+    let inner;
+    if(p.status === 'ready'){ inner = document.createElement('img'); inner.alt = ''; inner.src = p.thumb; }
+    else { inner = document.createElement('span'); inner.className = 'spin'; inner.setAttribute('aria-label', 'Preparing photo'); }
+    t.insertBefore(inner, t.firstChild);
+  }
+  return t;
+}
 function renderShots(){
   renderCapture('shotArea', 'bill', openBillCamera, openBillFiles, 'Add the gas bill', 'Take a photo, or pick one from your files');
   renderCapture('meterArea', 'meter', openMeterCamera, openMeterFiles, 'Add the meter reading', 'Photograph the meter or pump display');
@@ -432,13 +447,15 @@ function isImage(f){
 }
 function addTo(kind, list){
   if(sending) return;
+  let skipped = 0;
   Array.from(list || []).forEach(f => {
-    if(!isImage(f)) return;
+    if(!isImage(f)){ skipped++; return; }
     const item = { id: ++photoSeq, status:'processing', b64:null, thumb:null };
     listOf(kind).push(item);
     work.push({ item: item, kind: kind, file: f });
   });
   hideErr(); renderShots(); updateSubmit(); runQueue();
+  if(skipped) showErr(skipped === 1 ? 'That file is not a photo, so it was skipped.' : (skipped + ' files were not photos, so they were skipped.'));
 }
 async function runQueue(){
   if(working) return;
@@ -455,7 +472,10 @@ async function runQueue(){
         if(i > -1){ list.splice(i,1); showErr('One photo could not be read. Please take it again.'); }
       }
       job.file = null;
-      if(state.step === 3){ renderShots(); updateSubmit(); }
+      if(state.step === 3){
+        if(job.item.status === 'ready') tileFor(job.item, job.kind); else renderShots();
+        updateSubmit();
+      }
     }
   } finally { working = false; }
 }
@@ -471,28 +491,52 @@ function processPhoto(file){
     };
     // a photo that never opens cannot hang anything: it is dropped after 25s
     const to = setTimeout(() => finish(reject, new Error('image timed out')), 25000);
-    img.onload = () => {
+    const draw = async () => {
       if(settled) return;
       try{
         const W = img.naturalWidth || img.width, H = img.naturalHeight || img.height;
         if(!W || !H) throw new Error('empty image');
         const c = jobCanvas, ctx = c.getContext('2d');
         if(!ctx) throw new Error('no canvas');
+        // shrink the big camera photo once; the thumbnail comes from that smaller copy
         let s = Math.min(1, MAX_DIM / Math.max(W, H));
         c.width = Math.max(1, Math.round(W*s)); c.height = Math.max(1, Math.round(H*s));
         ctx.drawImage(img, 0, 0, c.width, c.height);
-        const b64 = c.toDataURL('image/jpeg', JPEG_Q).split(',')[1];
-        s = Math.min(1, THUMB_DIM / Math.max(W, H));
-        c.width = Math.max(1, Math.round(W*s)); c.height = Math.max(1, Math.round(H*s));
-        ctx.drawImage(img, 0, 0, c.width, c.height);
-        const thumb = c.toDataURL('image/jpeg', 0.7);
+        const tc = thumbCanvas, tctx = tc.getContext('2d');
+        s = Math.min(1, THUMB_DIM / Math.max(c.width, c.height));
+        tc.width = Math.max(1, Math.round(c.width*s)); tc.height = Math.max(1, Math.round(c.height*s));
+        tctx.drawImage(c, 0, 0, tc.width, tc.height);
+        const thumb = tc.toDataURL('image/jpeg', 0.7);
+        tc.width = 1; tc.height = 1;
+        const b64 = await encodeJpeg(c);
         c.width = 1; c.height = 1;                       // give the canvas memory back right away
         if(!b64) throw new Error('encode failed');
         finish(resolve, { b64: b64, thumb: thumb });
-      }catch(e){ try{ jobCanvas.width = 1; jobCanvas.height = 1; }catch(_){} finish(reject, e); }
+      }catch(e){ try{ jobCanvas.width = 1; jobCanvas.height = 1; thumbCanvas.width = 1; thumbCanvas.height = 1; }catch(_){} finish(reject, e); }
+    };
+    // decode() unpacks the photo in the background, so the screen stays responsive
+    img.onload = () => {
+      if(settled) return;
+      if(img.decode){ img.decode().then(draw, draw); } else { draw(); }
     };
     img.onerror = () => finish(reject, new Error('image failed'));
     img.src = url;
+  });
+}
+// JPEG encoding off the main thread where the phone supports it, plain fallback otherwise
+function encodeJpeg(c){
+  return new Promise((res, rej) => {
+    const plain = () => { try{ res((c.toDataURL('image/jpeg', JPEG_Q).split(',')[1]) || ''); }catch(e){ rej(e); } };
+    if(!c.toBlob || typeof FileReader === 'undefined') return plain();
+    try{
+      c.toBlob(b => {
+        if(!b || !b.size) return plain();
+        const fr = new FileReader();
+        fr.onload = () => { const r = String(fr.result || ''), i = r.indexOf(','); if(i > -1 && r.length > i + 1) res(r.slice(i + 1)); else plain(); };
+        fr.onerror = plain;
+        fr.readAsDataURL(b);
+      }, 'image/jpeg', JPEG_Q);
+    }catch(e){ plain(); }
   });
 }
 function openBillCamera(){ fileCamera.value=''; fileCamera.click(); }
@@ -549,12 +593,22 @@ el('submitBtn').addEventListener('click', async () => {
   // browsers cannot read back. We send with no-cors (the bill still saves on
   // the server) and confirm from a reference generated here, so the app never
   // hangs waiting for a reply it is not allowed to read.
-  const body = JSON.stringify({ ref:ref, driver:state.driver, station:state.station, timestamp:new Date().toISOString(),
-    photos: bills.map(p => p.b64), meterPhotos: meters.map(p => p.b64) });
   // bigger drops (lots of meter photos on mobile data) get more time, and the
   // clock only starts once everything is ready to send
-  const limit = Math.min(240000, 60000 + count * 8000);
+  const limit = Math.min(360000, 60000 + count * 8000);
   const label = count > 1 ? ('Sending ' + count + ' photos') : 'Sending';
+  btn.textContent = label + '…';
+  await new Promise(r => setTimeout(r, 60));          // let "Sending" show before packing the photos
+  // packed as a Blob straight from the stored photos: no second giant copy in memory
+  const parts = ['{"ref":', JSON.stringify(ref), ',"driver":', JSON.stringify(state.driver), ',"station":', JSON.stringify(state.station),
+    ',"timestamp":', JSON.stringify(new Date().toISOString()), ',"photos":['];
+  bills.forEach((p, i) => parts.push(i ? ',"' : '"', p.b64, '"'));
+  parts.push('],"meterPhotos":[');
+  meters.forEach((p, i) => parts.push(i ? ',"' : '"', p.b64, '"'));
+  parts.push(']}');
+  let body;
+  try{ body = new Blob(parts, { type:'text/plain;charset=utf-8' }); }catch(e){ body = parts.join(''); }
+  parts.length = 0;
   const started = Date.now();
   const tick = () => { if(sending) btn.textContent = label + '… ' + Math.round((Date.now() - started)/1000) + 's'; };
   let done = false, t = 0, watchdog = 0, ticker = 0;
