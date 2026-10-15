@@ -302,12 +302,19 @@
 const ENDPOINT = "https://script.google.com/macros/s/AKfycbxsYPvxVFMPKRyK74FtdZ6_sFUCjo7r_dg8ft7RmvY8f5KWGVPQ82t-ub12P9pxvZz-/exec";
 // ============================================================
 
-const DRIVERS = ['Travis D Williams','Jahmarie Brown','John Christian Hevarria'];
+const DRIVERS = [
+  {name:'Travis D Williams',      role:'Fuel delivery'},
+  {name:'Jahmarie Brown',         role:'Fuel delivery'},
+  {name:'John Christian Hevarria', role:'Fuel delivery'},
+  {name:'Shehzad Pakistan',       role:'Office'}
+];
 const STATIONS = [
-  'Cold Spring Svc Center','688 Freedom Plains Inc.','100 Route 17K',
-  '501 Nyack Inc.','One Stop Auto Center Shell76','Norwich Fresh Mkt Inc.',"Kirmani's Fresh Mkt Inc.",
-  'Dover Plains','Rockaway Petru Inc.','Sunrise V.S. Inc.','28 Main St Ct Inc.',
-  '189 Kings Park Inc.','Route 82 Verbank','600 Tulip Ave Inc.','200 23rd Street Enterprice Inc',
+  'Syed Empires Inc. Shell','Hermin Empires Inc. Shell','Kausar & Son Inc. Shell','H&K Mart Inc. Shell',
+  'Cold Spring Svc Center','KSK Auto Group Inc. Shell','NSK & Sons Inc. Shell','S. Michael & Son Inc. BP',
+  '688 Freedom Plains Inc.','100 Route 17K','501 Nyack Inc.','One Stop Auto Center Shell76',
+  'Norwich Fresh Mkt Inc.',"Kirmani's Fresh Mkt Inc.",'Dover Plains','Rockaway Petru Inc.',
+  '220 Northern Blvd Inc. Shell','Sunrise V.S. Inc.','28 Main St Ct Inc.','189 Kings Park Inc.',
+  'Route 82 Verbank','600 Tulip Ave Inc.','590 E Fordham Road Inc. Shell','200 23rd Street Enterprice Inc',
   '135 Montauk Hwy LLC','32 GermanTown Inc.','1429 Upper Front St','435 MPA Inc.',
   'Baba Jee Inc.','100 North 9th Street LLC','4184 Post Road'
 ];
@@ -332,13 +339,14 @@ function initials(name){ const p = name.trim().split(/\s+/); return (((p[0]||'')
 /* ---- step 1 : drivers ---- */
 function renderDrivers(){
   const box = el('driverList');
-  DRIVERS.forEach(name => {
+  DRIVERS.forEach(d => {
     const b = document.createElement('button'); b.className = 'dcard';
-    b.innerHTML = `<span class="avatar">${initials(name)}</span>
-      <span class="who"><span class="nm"></span><span class="rl">Fuel delivery</span></span>
+    b.innerHTML = `<span class="avatar">${initials(d.name)}</span>
+      <span class="who"><span class="nm"></span><span class="rl"></span></span>
       <span class="go">${ICON.chev}</span>`;
-    b.querySelector('.nm').textContent = name;
-    b.onclick = () => { state.driver = name; el('stationSearch').value=''; renderStations(''); showStep(2); };
+    b.querySelector('.nm').textContent = d.name;
+    b.querySelector('.rl').textContent = d.role || 'Fuel delivery';
+    b.onclick = () => { state.driver = d.name; el('stationSearch').value=''; renderStations(''); showStep(2); };
     box.appendChild(b);
   });
 }
