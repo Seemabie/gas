@@ -152,6 +152,9 @@
   .addmore{width:104px;height:132px;border-radius:14px;border:1.5px dashed var(--coral-line);background:var(--coral-soft);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;color:var(--coral-lt);font-family:var(--mono);font-size:12px;letter-spacing:.04em}
   .addmore:hover{background:rgba(255,111,89,.2)}
   .addmore svg{width:24px;height:24px}
+  .shot.processing{display:grid;place-items:center}
+  .spin{width:28px;height:28px;border-radius:50%;border:3px solid rgba(255,111,89,.22);border-top-color:var(--coral);animation:spin .8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
 
   /* two upload options */
   .droparea{
@@ -368,8 +371,19 @@ function renderStations(q){
 el('stationSearch').addEventListener('input', e => renderStations(e.target.value));
 
 /* ---- step 3 : photos (gas bill + meter reading) ---- */
-function renderCapture(areaId, arr, openCam, openFiles, emptyTitle, emptySub){
-  const area = el(areaId);
+// Every photo is shrunk the moment it is added, one at a time, and only a small
+// upload copy plus a tiny thumbnail are kept. The full camera image is released
+// straight away, so a drop with many meter photos never piles up in the phone's
+// memory, and Submit has nothing heavy left to do.
+const MAX_DIM = 1600, JPEG_Q = 0.82, THUMB_DIM = 260;
+const work = [];
+let working = false, sending = false, photoSeq = 0;
+const jobCanvas = document.createElement('canvas');
+const listOf = kind => kind === 'meter' ? state.meterPhotos : state.photos;
+const allPhotos = () => state.photos.concat(state.meterPhotos);
+
+function renderCapture(areaId, kind, openCam, openFiles, emptyTitle, emptySub){
+  const area = el(areaId), arr = listOf(kind);
   if(arr.length === 0){
     area.innerHTML = `<div class="droparea">
       <span class="cam">${ICON.cam}</span>
@@ -384,10 +398,18 @@ function renderCapture(areaId, arr, openCam, openFiles, emptyTitle, emptySub){
     area.querySelector('.file-btn').onclick = openFiles;
   } else {
     const wrap = document.createElement('div'); wrap.className='shots';
-    arr.forEach((p,i) => {
-      const s = document.createElement('div'); s.className='shot';
-      s.innerHTML = `<img src="${p.url}" alt=""><button class="x" type="button" aria-label="Remove">&times;</button>`;
-      s.querySelector('.x').onclick = () => { URL.revokeObjectURL(p.url); arr.splice(i,1); renderShots(); updateSubmit(); };
+    arr.forEach(p => {
+      const s = document.createElement('div');
+      s.className = 'shot' + (p.status === 'ready' ? '' : ' processing');
+      s.innerHTML = (p.status === 'ready' ? '<img alt="">' : '<span class="spin" aria-label="Preparing photo"></span>') +
+        '<button class="x" type="button" aria-label="Remove">&times;</button>';
+      if(p.status === 'ready') s.querySelector('img').src = p.thumb;
+      s.querySelector('.x').onclick = () => {
+        if(sending) return;
+        const list = listOf(kind), i = list.indexOf(p);
+        if(i > -1) list.splice(i,1);
+        renderShots(); updateSubmit();
+      };
       wrap.appendChild(s);
     });
     const addCam = document.createElement('button'); addCam.type='button'; addCam.className='addmore';
@@ -402,27 +424,95 @@ function renderCapture(areaId, arr, openCam, openFiles, emptyTitle, emptySub){
   }
 }
 function renderShots(){
-  renderCapture('shotArea', state.photos, openBillCamera, openBillFiles, 'Add the gas bill', 'Take a photo, or pick one from your files');
-  renderCapture('meterArea', state.meterPhotos, openMeterCamera, openMeterFiles, 'Add the meter reading', 'Photograph the meter or pump display');
+  renderCapture('shotArea', 'bill', openBillCamera, openBillFiles, 'Add the gas bill', 'Take a photo, or pick one from your files');
+  renderCapture('meterArea', 'meter', openMeterCamera, openMeterFiles, 'Add the meter reading', 'Photograph the meter or pump display');
 }
-function addTo(arr, list){
-  Array.from(list || []).forEach(f => { if(f.type.startsWith('image/')) arr.push({file:f, url:URL.createObjectURL(f)}); });
-  renderShots(); updateSubmit();
+function isImage(f){
+  return !!f && ((f.type || '').indexOf('image/') === 0 || (!f.type && /\.(jpe?g|png|heic|heif|webp|gif)$/i.test(f.name || '')));
+}
+function addTo(kind, list){
+  if(sending) return;
+  Array.from(list || []).forEach(f => {
+    if(!isImage(f)) return;
+    const item = { id: ++photoSeq, status:'processing', b64:null, thumb:null };
+    listOf(kind).push(item);
+    work.push({ item: item, kind: kind, file: f });
+  });
+  hideErr(); renderShots(); updateSubmit(); runQueue();
+}
+async function runQueue(){
+  if(working) return;
+  working = true;
+  try{
+    while(work.length){
+      const job = work.shift();
+      if(listOf(job.kind).indexOf(job.item) === -1) continue;   // removed before we got to it
+      try{
+        const out = await processPhoto(job.file);
+        job.item.b64 = out.b64; job.item.thumb = out.thumb; job.item.status = 'ready';
+      }catch(e){
+        const list = listOf(job.kind), i = list.indexOf(job.item);
+        if(i > -1){ list.splice(i,1); showErr('One photo could not be read. Please take it again.'); }
+      }
+      job.file = null;
+      if(state.step === 3){ renderShots(); updateSubmit(); }
+    }
+  } finally { working = false; }
+}
+function processPhoto(file){
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file), img = new Image();
+    let settled = false;
+    const finish = (fn, arg) => {
+      if(settled) return; settled = true; clearTimeout(to);
+      img.onload = img.onerror = null;
+      try{ URL.revokeObjectURL(url); }catch(e){}
+      fn(arg);
+    };
+    // a photo that never opens cannot hang anything: it is dropped after 25s
+    const to = setTimeout(() => finish(reject, new Error('image timed out')), 25000);
+    img.onload = () => {
+      if(settled) return;
+      try{
+        const W = img.naturalWidth || img.width, H = img.naturalHeight || img.height;
+        if(!W || !H) throw new Error('empty image');
+        const c = jobCanvas, ctx = c.getContext('2d');
+        if(!ctx) throw new Error('no canvas');
+        let s = Math.min(1, MAX_DIM / Math.max(W, H));
+        c.width = Math.max(1, Math.round(W*s)); c.height = Math.max(1, Math.round(H*s));
+        ctx.drawImage(img, 0, 0, c.width, c.height);
+        const b64 = c.toDataURL('image/jpeg', JPEG_Q).split(',')[1];
+        s = Math.min(1, THUMB_DIM / Math.max(W, H));
+        c.width = Math.max(1, Math.round(W*s)); c.height = Math.max(1, Math.round(H*s));
+        ctx.drawImage(img, 0, 0, c.width, c.height);
+        const thumb = c.toDataURL('image/jpeg', 0.7);
+        c.width = 1; c.height = 1;                       // give the canvas memory back right away
+        if(!b64) throw new Error('encode failed');
+        finish(resolve, { b64: b64, thumb: thumb });
+      }catch(e){ try{ jobCanvas.width = 1; jobCanvas.height = 1; }catch(_){} finish(reject, e); }
+    };
+    img.onerror = () => finish(reject, new Error('image failed'));
+    img.src = url;
+  });
 }
 function openBillCamera(){ fileCamera.value=''; fileCamera.click(); }
 function openBillFiles(){ fileFiles.value=''; fileFiles.click(); }
 function openMeterCamera(){ fileMeterCamera.value=''; fileMeterCamera.click(); }
 function openMeterFiles(){ fileMeterFiles.value=''; fileMeterFiles.click(); }
-fileCamera.addEventListener('change', () => { addTo(state.photos, fileCamera.files); fileCamera.value=''; });
-fileFiles.addEventListener('change', () => { addTo(state.photos, fileFiles.files); fileFiles.value=''; });
-fileMeterCamera.addEventListener('change', () => { addTo(state.meterPhotos, fileMeterCamera.files); fileMeterCamera.value=''; });
-fileMeterFiles.addEventListener('change', () => { addTo(state.meterPhotos, fileMeterFiles.files); fileMeterFiles.value=''; });
+fileCamera.addEventListener('change', () => { addTo('bill', fileCamera.files); fileCamera.value=''; });
+fileFiles.addEventListener('change', () => { addTo('bill', fileFiles.files); fileFiles.value=''; });
+fileMeterCamera.addEventListener('change', () => { addTo('meter', fileMeterCamera.files); fileMeterCamera.value=''; });
+fileMeterFiles.addEventListener('change', () => { addTo('meter', fileMeterFiles.files); fileMeterFiles.value=''; });
 function updateSubmit(){
-  const okBill = state.photos.length > 0, okMeter = state.meterPhotos.length > 0;
-  el('submitBtn').disabled = !(okBill && okMeter);
-  const hint = el('hintLine');
-  if(okBill && okMeter){ hint.style.display='none'; hint.textContent=''; }
-  else { hint.textContent = (!okBill && !okMeter) ? 'Add a gas bill photo and a meter photo' : (!okBill ? 'Add a gas bill photo' : 'Add a meter reading photo'); hint.style.display='block'; }
+  const busy = allPhotos().filter(p => p.status !== 'ready').length;
+  const okBill = state.photos.some(p => p.status === 'ready'), okMeter = state.meterPhotos.some(p => p.status === 'ready');
+  if(!sending) el('submitBtn').disabled = busy > 0 || !(okBill && okMeter);
+  let msg = '';
+  if(busy) msg = 'Preparing photos… ' + busy + ' left';
+  else if(!okBill && !okMeter) msg = 'Add a gas bill photo and a meter photo';
+  else if(!okBill) msg = 'Add a gas bill photo';
+  else if(!okMeter) msg = 'Add a meter reading photo';
+  const hint = el('hintLine'); hint.textContent = msg; hint.style.display = msg ? 'block' : 'none';
 }
 
 /* ---- navigation ---- */
@@ -432,75 +522,65 @@ function showStep(n){
   el('s'+n).classList.add('active');
   [1,2,3].forEach(i => { const d=el('d'+i); d.classList.toggle('on', i <= Math.min(n,3)); d.classList.toggle('done', n===4); });
   el('dock').classList.toggle('show', n===3);
-  if(n===3){ el('ctxDriver').textContent = state.driver; el('ctxStation').textContent = state.station; renderShots(); updateSubmit(); hideErr(); }
+  if(n===3){
+    el('ctxDriver').textContent = state.driver; el('ctxStation').textContent = state.station;
+    if(!sending) el('submitBtn').textContent = 'Submit';
+    hideErr(); renderShots(); updateSubmit();
+  }
   window.scrollTo({top:0, behavior:'instant'});
 }
-document.querySelectorAll('[data-back]').forEach(b => b.onclick = () => showStep(parseInt(b.dataset.back,10)));
+document.querySelectorAll('[data-back]').forEach(b => b.onclick = () => { if(!sending) showStep(parseInt(b.dataset.back,10)); });
 
 /* ---- upload ---- */
-function shrink(file, maxDim, q){
-  maxDim = maxDim || 1600; q = q || 0.82;
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file), img = new Image();
-    let settled = false;
-    const finish = (fn, arg) => { if(settled) return; settled = true; clearTimeout(to); try{ URL.revokeObjectURL(url); }catch(e){} fn(arg); };
-    // never let a photo that won't decode hang the whole submit
-    const to = setTimeout(() => finish(reject, new Error('image timed out')), 25000);
-    img.onload = () => {
-      if(settled) return;
-      try{
-        let w = img.width, h = img.height;
-        if(!w || !h){ finish(reject, new Error('empty image')); return; }
-        if(Math.max(w,h) > maxDim){ const s = maxDim/Math.max(w,h); w = Math.round(w*s); h = Math.round(h*s); }
-        const c = document.createElement('canvas'); c.width = w; c.height = h;
-        c.getContext('2d').drawImage(img, 0, 0, w, h);
-        finish(resolve, c.toDataURL('image/jpeg', q).split(',')[1]);
-      }catch(e){ finish(reject, e); }
-    };
-    img.onerror = () => finish(reject, new Error('image failed'));
-    img.src = url;
-  });
-}
-async function buildPayload(ref, onProgress){
-  const photos = [], meterPhotos = []; let d = 0;
-  const total = state.photos.length + state.meterPhotos.length;
-  for(const p of state.photos){ photos.push(await shrink(p.file)); d++; if(onProgress) onProgress(d, total); }
-  for(const p of state.meterPhotos){ meterPhotos.push(await shrink(p.file)); d++; if(onProgress) onProgress(d, total); }
-  return { ref:ref, driver:state.driver, station:state.station, timestamp:new Date().toISOString(), photos, meterPhotos };
-}
 function showErr(m){ const e=el('errLine'); e.textContent=m; e.style.display='block'; }
 function hideErr(){ el('errLine').style.display='none'; }
 
 el('submitBtn').addEventListener('click', async () => {
-  if(state.photos.length === 0 || state.meterPhotos.length === 0) return;
+  if(sending) return;
+  const bills = state.photos.filter(p => p.status === 'ready');
+  const meters = state.meterPhotos.filter(p => p.status === 'ready');
+  if(!bills.length || !meters.length || allPhotos().some(p => p.status !== 'ready')) return;
   const btn = el('submitBtn'); hideErr();
-  const ref = demoRef();
+  const ref = makeRef();
   if(!ENDPOINT){ finishDone(ref, null); return; }
-  btn.disabled = true; btn.textContent = 'Preparing…';
+  const count = bills.length + meters.length;
+  sending = true; btn.disabled = true;
   // Fire-and-forget: Apps Script answers from a different domain, which phone
   // browsers cannot read back. We send with no-cors (the bill still saves on
   // the server) and confirm from a reference generated here, so the app never
   // hangs waiting for a reply it is not allowed to read.
-  let done = false;
-  const recover = (msg) => { if(done) return; done = true; clearTimeout(t); clearTimeout(watchdog); btn.disabled = false; btn.textContent = 'Retry submit'; showErr(msg); };
-  // overall safety net: whatever stalls (image decode, upload, anything), the
-  // button always comes back so nothing freezes on screen.
-  const watchdog = setTimeout(() => recover('That took too long. Please check your signal and try again.'), 70000);
-  const c = new AbortController(); const t = setTimeout(() => c.abort(), 45000);
+  const body = JSON.stringify({ ref:ref, driver:state.driver, station:state.station, timestamp:new Date().toISOString(),
+    photos: bills.map(p => p.b64), meterPhotos: meters.map(p => p.b64) });
+  // bigger drops (lots of meter photos on mobile data) get more time, and the
+  // clock only starts once everything is ready to send
+  const limit = Math.min(240000, 60000 + count * 8000);
+  const label = count > 1 ? ('Sending ' + count + ' photos') : 'Sending';
+  const started = Date.now();
+  const tick = () => { if(sending) btn.textContent = label + '… ' + Math.round((Date.now() - started)/1000) + 's'; };
+  let done = false, t = 0, watchdog = 0, ticker = 0;
+  const stop = () => { done = true; sending = false; clearTimeout(t); clearTimeout(watchdog); clearInterval(ticker); };
+  const recover = msg => { if(done) return; stop(); updateSubmit(); btn.textContent = 'Retry submit'; showErr(msg); };
+  const c = new AbortController();
+  tick(); ticker = setInterval(tick, 1000);
+  t = setTimeout(() => c.abort(), limit);
+  // last-resort safety net: the button always comes back, nothing can freeze on screen
+  watchdog = setTimeout(() => recover('That took too long. Please check your signal and try again.'), limit + 15000);
   try{
-    const payload = await buildPayload(ref, (n,tt) => { if(!done) btn.textContent = `Uploading… ${n}/${tt}`; });
+    await fetch(ENDPOINT, { method:'POST', mode:'no-cors', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: body, signal: c.signal });
     if(done) return;
-    btn.textContent = 'Sending…';
-    await fetch(ENDPOINT, { method:'POST', mode:'no-cors', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify(payload), signal: c.signal });
-    if(done) return;
-    done = true; clearTimeout(t); clearTimeout(watchdog);
+    stop();
     finishDone(ref, null);
   }catch(err){
     recover((err && err.name === 'AbortError') ? 'The upload took too long on this connection. Please try again.' : ('Could not send: ' + (err.message || err)));
   }
 });
 
-function demoRef(){ return 'BILL-' + new Date().toISOString().slice(2,10).replace(/-/g,'') + '-' + Math.random().toString(36).slice(2,5).toUpperCase(); }
+// reference uses the phone's local date, so evening drops don't get tomorrow's date
+function makeRef(){
+  const d = new Date(), p = n => String(n).padStart(2, '0');
+  const rnd = Math.random().toString(36).slice(2).padEnd(3, '0').slice(0, 3).toUpperCase();
+  return 'BILL-' + String(d.getFullYear()).slice(2) + p(d.getMonth()+1) + p(d.getDate()) + '-' + rnd;
+}
 
 function finishDone(ref, folderUrl){
   const now = new Date();
@@ -521,14 +601,12 @@ function finishDone(ref, folderUrl){
 
 /* ---- success actions ---- */
 el('againBtn').addEventListener('click', () => {
-  state.photos.forEach(p => URL.revokeObjectURL(p.url));
-  state.meterPhotos.forEach(p => URL.revokeObjectURL(p.url));
+  work.length = 0;
   state.photos = []; state.meterPhotos = [];
   showStep(3);
 });
 el('newBtn').addEventListener('click', () => {
-  state.photos.forEach(p => URL.revokeObjectURL(p.url));
-  state.meterPhotos.forEach(p => URL.revokeObjectURL(p.url));
+  work.length = 0;
   state = { step:1, driver:'', station:'', photos:[], meterPhotos:[] };
   el('stationSearch').value = '';
   showStep(1);
