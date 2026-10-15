@@ -187,6 +187,17 @@
   .dock{position:fixed;left:0;right:0;bottom:0;z-index:40;display:none;padding:14px 20px;padding-bottom:max(16px,env(safe-area-inset-bottom));background:linear-gradient(0deg, var(--bg) 62%, transparent)}
   .dock.show{display:block}
   .dock-in{max-width:500px;margin:0 auto}
+  /* step 3 always leaves room for the Submit bar, so every photo and button can be reached */
+  #s3{padding-bottom:calc(var(--dock-h, 170px) + 28px)}
+  .capwrap{border-radius:18px;transition:box-shadow .15s, background .15s}
+  .capwrap.dragover{box-shadow:0 0 0 2px var(--coral);background:var(--coral-soft)}
+  .drophint{display:none;font-size:13px;color:var(--muted);margin:8px 2px 0}
+  @media(hover:hover) and (pointer:fine){ .drophint{display:block} }
+  @media(min-width:900px){
+    .app,.dock-in{max-width:760px}
+    .screen{padding-left:32px;padding-right:32px}
+    .shot{width:124px;height:156px}
+  }
   .err{color:var(--coral-lt);font-size:13.5px;text-align:center;margin-bottom:10px;font-weight:500}
 
   .btn{
@@ -264,9 +275,11 @@
       <span class="chip"><span class="ch-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s7-6.4 7-12a7 7 0 1 0-14 0c0 5.6 7 12 7 12Z"/><circle cx="12" cy="9" r="2.4"/></svg></span><b id="ctxStation">—</b></span>
     </div>
     <div class="caplabel">Gas bill</div>
-    <div id="shotArea"></div>
+    <div id="shotArea" class="capwrap"></div>
+    <div class="drophint">On a computer you can also drag bill photos here.</div>
     <div class="caplabel caplabel-2">Meter reading</div>
-    <div id="meterArea"></div>
+    <div id="meterArea" class="capwrap"></div>
+    <div class="drophint">On a computer you can also drag meter photos here.</div>
   </section>
 
   <!-- STEP 4 : DONE -->
@@ -557,6 +570,7 @@ function updateSubmit(){
   else if(!okBill) msg = 'Add a gas bill photo';
   else if(!okMeter) msg = 'Add a meter reading photo';
   const hint = el('hintLine'); hint.textContent = msg; hint.style.display = msg ? 'block' : 'none';
+  if(typeof fitDock === 'function') fitDock();
 }
 
 /* ---- navigation ---- */
@@ -576,8 +590,49 @@ function showStep(n){
 document.querySelectorAll('[data-back]').forEach(b => b.onclick = () => { if(!sending) showStep(parseInt(b.dataset.back,10)); });
 
 /* ---- upload ---- */
-function showErr(m){ const e=el('errLine'); e.textContent=m; e.style.display='block'; }
-function hideErr(){ el('errLine').style.display='none'; }
+function showErr(m){ const e=el('errLine'); e.textContent=m; e.style.display='block'; if(typeof fitDock === 'function') fitDock(); }
+function hideErr(){ el('errLine').style.display='none'; if(typeof fitDock === 'function') fitDock(); }
+
+/* ---- upload: photos go up a few at a time, Drive confirms, then one log row ---- */
+// Each photo is its own small request, so a weak signal only ever retries one
+// photo, never the whole drop. The server remembers what it already saved for a
+// reference, so Retry never saves anything twice. Before saying Saved we ask the
+// server (a readable check) whether every photo and the log row are really there.
+const PARALLEL = 4, PIECE_MS = 90000, CHECK_MS = 20000, IDLE_MS = 120000;
+let pending = null;            // the drop being sent, kept across Retry so nothing is sent twice
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function dropSig(){ return state.driver + '|' + state.station + '|' + allPhotos().map(p => p.id).join(','); }
+
+function postJSON(obj, ms){
+  const c = new AbortController();
+  const t = setTimeout(() => c.abort(), ms);
+  return fetch(ENDPOINT, { method:'POST', mode:'no-cors', headers:{'Content-Type':'text/plain;charset=utf-8'},
+    body: JSON.stringify(obj), signal: c.signal }).finally(() => clearTimeout(t));
+}
+
+// a readable answer from Apps Script on every phone: a tiny script tag (JSONP)
+function askServer(params, ms){
+  return new Promise((resolve, reject) => {
+    const cb = '__nsk' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    const s = document.createElement('script');
+    let done = false;
+    const end = () => { done = true; clearTimeout(t); window[cb] = function(){}; if(s.parentNode) s.parentNode.removeChild(s); };
+    window[cb] = data => { if(done) return; end(); resolve(data || {}); };
+    s.onerror = () => { if(done) return; end(); reject(new Error('no answer')); };
+    s.onload = () => setTimeout(() => { if(done) return; end(); reject(new Error('bad answer')); }, 0);
+    const t = setTimeout(() => { if(done) return; end(); reject(new Error('no answer')); }, ms);
+    const q = Object.keys(params).map(k => encodeURIComponent(k) + '=' + encodeURIComponent(params[k])).join('&');
+    s.src = ENDPOINT + '?' + q + '&callback=' + cb + '&_=' + Date.now();
+    document.head.appendChild(s);
+  });
+}
+
+async function runPool(items, n, fn){
+  let i = 0;
+  const worker = async () => { while(i < items.length){ const it = items[i++]; await fn(it); } };
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, worker));
+}
 
 el('submitBtn').addEventListener('click', async () => {
   if(sending) return;
@@ -585,47 +640,110 @@ el('submitBtn').addEventListener('click', async () => {
   const meters = state.meterPhotos.filter(p => p.status === 'ready');
   if(!bills.length || !meters.length || allPhotos().some(p => p.status !== 'ready')) return;
   const btn = el('submitBtn'); hideErr();
-  const ref = makeRef();
-  if(!ENDPOINT){ finishDone(ref, null); return; }
-  const count = bills.length + meters.length;
+
+  const sig = dropSig();
+  if(pending && pending.sig !== sig){
+    // photos or station changed after a failed try: clear what that try left in Drive
+    const old = pending;
+    if(ENDPOINT && Object.keys(old.sent).length) postJSON({ action:'cancel', ref:old.ref, bills:old.nb, meters:old.nm }, 30000).catch(() => {});
+    pending = null;
+  }
+  if(!pending) pending = { ref: makeRef(), sig: sig, sent: {}, nb: bills.length, nm: meters.length };
+  const job = pending, ref = job.ref;
+  if(!ENDPOINT){ pending = null; finishDone(ref, null); return; }
+
+  const pieces = [];
+  bills.forEach((p, i) => pieces.push({ key:'b' + i, kind:'bill', index:i, total:bills.length, p:p }));
+  meters.forEach((p, i) => pieces.push({ key:'m' + i, kind:'meter', index:i, total:meters.length, p:p }));
+  const count = pieces.length;
+
   sending = true; btn.disabled = true;
-  // Fire-and-forget: Apps Script answers from a different domain, which phone
-  // browsers cannot read back. We send with no-cors (the bill still saves on
-  // the server) and confirm from a reference generated here, so the app never
-  // hangs waiting for a reply it is not allowed to read.
-  // bigger drops (lots of meter photos on mobile data) get more time, and the
-  // clock only starts once everything is ready to send
-  const limit = Math.min(360000, 60000 + count * 8000);
-  const label = count > 1 ? ('Sending ' + count + ' photos') : 'Sending';
-  btn.textContent = label + '…';
-  await new Promise(r => setTimeout(r, 60));          // let "Sending" show before packing the photos
-  // packed as a Blob straight from the stored photos: no second giant copy in memory
-  const parts = ['{"ref":', JSON.stringify(ref), ',"driver":', JSON.stringify(state.driver), ',"station":', JSON.stringify(state.station),
-    ',"timestamp":', JSON.stringify(new Date().toISOString()), ',"photos":['];
-  bills.forEach((p, i) => parts.push(i ? ',"' : '"', p.b64, '"'));
-  parts.push('],"meterPhotos":[');
-  meters.forEach((p, i) => parts.push(i ? ',"' : '"', p.b64, '"'));
-  parts.push(']}');
-  let body;
-  try{ body = new Blob(parts, { type:'text/plain;charset=utf-8' }); }catch(e){ body = parts.join(''); }
-  parts.length = 0;
-  const started = Date.now();
-  const tick = () => { if(sending) btn.textContent = label + '… ' + Math.round((Date.now() - started)/1000) + 's'; };
-  let done = false, t = 0, watchdog = 0, ticker = 0;
-  const stop = () => { done = true; sending = false; clearTimeout(t); clearTimeout(watchdog); clearInterval(ticker); };
-  const recover = msg => { if(done) return; stop(); updateSubmit(); btn.textContent = 'Retry submit'; showErr(msg); };
-  const c = new AbortController();
-  tick(); ticker = setInterval(tick, 1000);
-  t = setTimeout(() => c.abort(), limit);
-  // last-resort safety net: the button always comes back, nothing can freeze on screen
-  watchdog = setTimeout(() => recover('That took too long. Please check your signal and try again.'), limit + 15000);
+  let over = false, idle = 0;
+  const show = t => { if(sending && !over) btn.textContent = t; };
+  const fail = msg => {
+    if(over) return; over = true; clearTimeout(idle);
+    sending = false; updateSubmit(); btn.textContent = 'Retry submit';
+    showErr(msg);
+  };
+  // safety net: if nothing moves for 2 minutes the button always comes back
+  const alive = () => { clearTimeout(idle); idle = setTimeout(() => fail('No signal for a while. Tap Retry submit. Photos already sent will not be sent twice.'), IDLE_MS); };
+  alive();
+
+  const label = () => {
+    const n = pieces.filter(pc => job.sent[pc.key]).length;
+    show(count > 1 ? ('Sending ' + n + ' of ' + count + ' photos…') : 'Sending…');
+  };
+  // a bad patch of signal just retries; only a dead connection (6 failures in a row
+  // with nothing getting through) stops early so nobody waits for nothing
+  let streak = 0;
+  const sendPiece = async pc => {
+    for(let attempt = 0; attempt < 5 && !over; attempt++){
+      if(navigator.onLine === false){ fail('This phone is offline. Connect to Wi-Fi or data, then tap Retry submit. Photos already sent will not be sent twice.'); return; }
+      try{
+        await postJSON({ action:'photo', ref:ref, driver:state.driver, station:state.station,
+          kind:pc.kind, index:pc.index, total:pc.total, data:pc.p.b64 }, PIECE_MS);
+        streak = 0; job.sent[pc.key] = true; alive(); label();
+        return;
+      }catch(e){
+        if(++streak >= 6){ fail('Cannot reach Drive on this signal. Tap Retry submit when the signal is better. Photos already sent will not be sent twice.'); return; }
+        if(!over) await sleep(1000 * (attempt + 1));
+      }
+    }
+  };
+  const check = async () => {
+    try{
+      const r = await askServer({ action:'check', ref:ref, bills:bills.length, meters:meters.length }, CHECK_MS);
+      if(r && r.ok){ alive(); return r; }
+    }catch(e){}
+    return null;
+  };
+
   try{
-    await fetch(ENDPOINT, { method:'POST', mode:'no-cors', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: body, signal: c.signal });
-    if(done) return;
-    stop();
+    label();
+    for(let round = 0; round < 3 && !over; round++){
+      await runPool(pieces.filter(pc => !job.sent[pc.key]), PARALLEL, sendPiece);
+      if(over) return;
+      if(pieces.some(pc => !job.sent[pc.key])){ await sleep(2000); continue; }   // another pass for the stragglers
+      show('Checking with Drive…');
+      const r = await check();
+      if(!r){ break; }                                     // can't ask right now: trust the finished uploads
+      const missing = (r.missingBills || []).map(i => 'b' + i).concat((r.missingMeters || []).map(i => 'm' + i));
+      if(!missing.length) break;
+      missing.forEach(k => { delete job.sent[k]; });
+      label();
+    }
+    if(over) return;
+    if(pieces.some(pc => !job.sent[pc.key])){
+      fail('Some photos did not go through on this signal. Tap Retry submit to send just those.');
+      return;
+    }
+
+    show('Saving to the log…');
+    let logged = false;
+    for(let attempt = 0; attempt < 3 && !over && !logged; attempt++){
+      try{
+        await postJSON({ action:'finish', ref:ref, driver:state.driver, station:state.station,
+          bills:bills.length, meters:meters.length }, 60000);
+        alive();
+      }catch(e){ await sleep(2000 * (attempt + 1)); continue; }
+      const r = await check();
+      if(!r){ logged = true; break; }                      // no readable answer: the finish request did complete
+      if(r.logged){ logged = true; break; }
+      const missing = (r.missingBills || []).map(i => 'b' + i).concat((r.missingMeters || []).map(i => 'm' + i));
+      if(missing.length){
+        missing.forEach(k => { delete job.sent[k]; });
+        label();
+        await runPool(pieces.filter(pc => !job.sent[pc.key]), PARALLEL, sendPiece);
+        show('Saving to the log…');
+      }
+    }
+    if(over) return;
+    if(!logged){ fail('The photos are in Drive but the log did not answer. Tap Retry submit to finish.'); return; }
+    over = true; clearTimeout(idle);
+    sending = false; pending = null;
     finishDone(ref, null);
   }catch(err){
-    recover((err && err.name === 'AbortError') ? 'The upload took too long on this connection. Please try again.' : ('Could not send: ' + (err.message || err)));
+    fail('Could not send: ' + ((err && err.message) || err));
   }
 });
 
@@ -655,16 +773,39 @@ function finishDone(ref, folderUrl){
 
 /* ---- success actions ---- */
 el('againBtn').addEventListener('click', () => {
-  work.length = 0;
+  work.length = 0; pending = null;
   state.photos = []; state.meterPhotos = [];
   showStep(3);
 });
 el('newBtn').addEventListener('click', () => {
-  work.length = 0;
+  work.length = 0; pending = null;
   state = { step:1, driver:'', station:'', photos:[], meterPhotos:[] };
   el('stationSearch').value = '';
   showStep(1);
 });
+
+/* computer friendly: drag photos onto either section; keep room for the Submit bar */
+function setupDrop(areaId, kind){
+  const area = el(areaId);
+  let depth = 0;
+  area.addEventListener('dragenter', e => { e.preventDefault(); depth++; if(!sending) area.classList.add('dragover'); });
+  area.addEventListener('dragover', e => { e.preventDefault(); if(e.dataTransfer) e.dataTransfer.dropEffect = sending ? 'none' : 'copy'; });
+  area.addEventListener('dragleave', () => { depth = Math.max(0, depth - 1); if(!depth) area.classList.remove('dragover'); });
+  area.addEventListener('drop', e => {
+    e.preventDefault(); depth = 0; area.classList.remove('dragover');
+    if(!sending && e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) addTo(kind, e.dataTransfer.files);
+  });
+}
+setupDrop('shotArea', 'bill');
+setupDrop('meterArea', 'meter');
+// a photo dropped anywhere else must not open in the tab and wipe the drop
+['dragover', 'drop'].forEach(t => window.addEventListener(t, e => { if(!(e.target && e.target.closest && e.target.closest('.capwrap'))) e.preventDefault(); }));
+function fitDock(){
+  const h = el('dock').offsetHeight;
+  if(h) document.documentElement.style.setProperty('--dock-h', h + 'px');
+}
+if(window.ResizeObserver){ new ResizeObserver(fitDock).observe(el('dock')); }
+window.addEventListener('resize', fitDock);
 
 /* init */
 renderDrivers();
