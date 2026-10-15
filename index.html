@@ -598,7 +598,7 @@ function hideErr(){ el('errLine').style.display='none'; if(typeof fitDock === 'f
 // photo, never the whole drop. The server remembers what it already saved for a
 // reference, so Retry never saves anything twice. Before saying Saved we ask the
 // server (a readable check) whether every photo and the log row are really there.
-const PARALLEL = 4, PIECE_MS = 90000, CHECK_MS = 20000, IDLE_MS = 120000;
+const PARALLEL = 6, PIECE_MS = 90000, CHECK_MS = 20000, IDLE_MS = 120000;
 let pending = null;            // the drop being sent, kept across Retry so nothing is sent twice
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -673,7 +673,7 @@ el('submitBtn').addEventListener('click', async () => {
     const n = pieces.filter(pc => job.sent[pc.key]).length;
     show(count > 1 ? ('Sending ' + n + ' of ' + count + ' photos…') : 'Sending…');
   };
-  // a bad patch of signal just retries; only a dead connection (6 failures in a row
+  // a bad patch of signal just retries; only a dead connection (12 failures in a row
   // with nothing getting through) stops early so nobody waits for nothing
   let streak = 0;
   const sendPiece = async pc => {
@@ -685,7 +685,7 @@ el('submitBtn').addEventListener('click', async () => {
         streak = 0; job.sent[pc.key] = true; alive(); label();
         return;
       }catch(e){
-        if(++streak >= 6){ fail('Cannot reach Drive on this signal. Tap Retry submit when the signal is better. Photos already sent will not be sent twice.'); return; }
+        if(++streak >= PARALLEL * 2){ fail('Cannot reach Drive on this signal. Tap Retry submit when the signal is better. Photos already sent will not be sent twice.'); return; }
         if(!over) await sleep(1000 * (attempt + 1));
       }
     }
