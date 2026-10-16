@@ -287,7 +287,7 @@
     <div class="success">
       <div class="seal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div>
       <h2>Saved</h2>
-      <p class="note">Bill and meter reading filed in Drive.</p>
+      <p class="note" id="doneNote">Bill and meter reading filed in Drive.</p>
       <div class="receipt" id="receipt"></div>
       <div class="actions">
         <a class="btn btn-ghost" id="driveBtn" target="_blank" rel="noopener" style="display:none">Open station folder</a>
@@ -563,12 +563,11 @@ fileMeterFiles.addEventListener('change', () => { addTo('meter', fileMeterFiles.
 function updateSubmit(){
   const busy = allPhotos().filter(p => p.status !== 'ready').length;
   const okBill = state.photos.some(p => p.status === 'ready'), okMeter = state.meterPhotos.some(p => p.status === 'ready');
-  if(!sending) el('submitBtn').disabled = busy > 0 || !(okBill && okMeter);
+  // a gas bill, a meter reading, or both: either one is enough to submit
+  if(!sending) el('submitBtn').disabled = busy > 0 || !(okBill || okMeter);
   let msg = '';
   if(busy) msg = 'Preparing photos… ' + busy + ' left';
-  else if(!okBill && !okMeter) msg = 'Add a gas bill photo and a meter photo';
-  else if(!okBill) msg = 'Add a gas bill photo';
-  else if(!okMeter) msg = 'Add a meter reading photo';
+  else if(!okBill && !okMeter) msg = 'Add a gas bill photo, a meter photo, or both';
   const hint = el('hintLine'); hint.textContent = msg; hint.style.display = msg ? 'block' : 'none';
   if(typeof fitDock === 'function') fitDock();
 }
@@ -638,7 +637,7 @@ el('submitBtn').addEventListener('click', async () => {
   if(sending) return;
   const bills = state.photos.filter(p => p.status === 'ready');
   const meters = state.meterPhotos.filter(p => p.status === 'ready');
-  if(!bills.length || !meters.length || allPhotos().some(p => p.status !== 'ready')) return;
+  if(!(bills.length || meters.length) || allPhotos().some(p => p.status !== 'ready')) return;
   const btn = el('submitBtn'); hideErr();
 
   const sig = dropSig();
@@ -763,6 +762,8 @@ function finishDone(ref, folderUrl){
     ['Date', dateStr],
     ['Ref', ref || '—']
   ];
+  const hasB = state.photos.length > 0, hasM = state.meterPhotos.length > 0;
+  el('doneNote').textContent = hasB && hasM ? 'Bill and meter reading filed in Drive.' : (hasB ? 'Gas bill filed in Drive.' : 'Meter reading filed in Drive.');
   el('receipt').innerHTML = rows.map(r => `<div class="rline"><span class="k">${r[0]}</span><span class="v"></span></div>`).join('');
   el('receipt').querySelectorAll('.v').forEach((v,i) => v.textContent = rows[i][1]);
   const link = el('driveBtn');
